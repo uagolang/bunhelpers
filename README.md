@@ -13,6 +13,16 @@ A collection of powerful helper functions and utilities for [Bun ORM](https://gi
 - 🏗️ **Querier Interface**: Context-aware query builders that automatically use transactions from context
 - ❌ **Error Handling**: Specialized error checkers for common database errors
 
+## Database Compatibility
+
+This library works with all databases supported by Bun (PostgreSQL, MySQL, SQLite, MSSQL). However, some features are **PostgreSQL-specific**:
+
+- **JSONB Selectors**: `WhereJsonbEqual`, `WhereJsonbPathEqual`, `WhereJsonbObjectsArrayKeyValueEqual`, `WhereJsonbPathObjectsArrayKeyValueEqual` - require PostgreSQL's JSONB support
+- **Case-insensitive string matching**: `WhereContains`, `WhereBegins`, `WhereEnds` - use PostgreSQL's `ILIKE` operator
+- **DISTINCT ON**: `WhereDistinctOn` - uses PostgreSQL's `DISTINCT ON` clause
+
+All other features (transactions, basic selectors, querier interface, error handling, etc.) are database-agnostic and work across all supported databases.
+
 ## Installation
 
 ```bash
@@ -73,7 +83,7 @@ query.Apply(bunhelpers.WhereNotNull("verified_at"))
 query.Apply(bunhelpers.WhereIn("id", []string{"1", "2", "3"}))
 query.Apply(bunhelpers.WhereNotIn("status", []string{"banned", "suspended"}))
 
-// String matching (case-insensitive)
+// String matching (case-insensitive, PostgreSQL ILIKE operator)
 query.Apply(bunhelpers.WhereContains("name", "john"))  // ILIKE '%john%'
 query.Apply(bunhelpers.WhereBegins("email", "admin")) // ILIKE 'admin%'
 query.Apply(bunhelpers.WhereEnds("domain", ".com"))   // ILIKE '%.com'
@@ -84,6 +94,8 @@ query.Apply(bunhelpers.WhereAfter("updated_at", lastWeek))
 ```
 
 #### JSONB Selectors
+
+**Note: PostgreSQL only**
 
 Work with PostgreSQL JSONB columns safely:
 
@@ -345,17 +357,6 @@ if bunhelpers.IsConstraintError(err) {
 }
 ```
 
-#### Predefined Errors
-
-```go
-var (
-    ErrInvalidRequest  = errors.New("invalid request")
-    ErrInvalidResponse = errors.New("invalid response type")
-    ErrEmptyPK         = errors.New("primary key (id, email etc.) is empty")
-    ErrNilRequest      = errors.New("no request data")
-)
-```
-
 ## Complete Example
 
 ```go
@@ -488,16 +489,16 @@ func main() {
 - `WhereNotNull(col string) Selector`
 - `WhereIn(col string, values any) Selector`
 - `WhereNotIn(col string, values any) Selector`
-- `WhereContains(col string, substr string) Selector`
-- `WhereBegins(col string, substr string) Selector`
-- `WhereEnds(col string, substr string) Selector`
+- `WhereContains(col string, substr string) Selector` (PostgreSQL ILIKE)
+- `WhereBegins(col string, substr string) Selector` (PostgreSQL ILIKE)
+- `WhereEnds(col string, substr string) Selector` (PostgreSQL ILIKE)
 - `WhereBefore(col string, t time.Time) Selector`
 - `WhereAfter(col string, t time.Time) Selector`
-- `WhereDistinctOn(col string) Selector`
-- `WhereJsonbEqual(col string, field string, value any) Selector`
-- `WhereJsonbPathEqual(col string, path []string, value any) Selector`
-- `WhereJsonbObjectsArrayKeyValueEqual(col string, key, field string, value any) Selector`
-- `WhereJsonbPathObjectsArrayKeyValueEqual(col string, path []string, field string, value any) Selector`
+- `WhereDistinctOn(col string) Selector` (PostgreSQL only)
+- `WhereJsonbEqual(col string, field string, value any) Selector` (PostgreSQL only)
+- `WhereJsonbPathEqual(col string, path []string, value any) Selector` (PostgreSQL only)
+- `WhereJsonbObjectsArrayKeyValueEqual(col string, key, field string, value any) Selector` (PostgreSQL only)
+- `WhereJsonbPathObjectsArrayKeyValueEqual(col string, path []string, field string, value any) Selector` (PostgreSQL only)
 
 ### Transaction Context
 
@@ -534,3 +535,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - Built on top of the excellent [Bun ORM](https://github.com/uptrace/bun)
+- Ukrainian Golang Community [@uagolang](https://t.me/uagolang)
+- [Kuberly.io](https://kuberly.io) - your devs should work on product, not on infra
