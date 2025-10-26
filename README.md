@@ -333,7 +333,7 @@ where := &bunhelpers.Where{IDs: []string{"1", "2"}}
 
 query := db.NewSelect().
     Model(&users).
-    Apply(bunhelpers.NestedWhere(where)).
+    Apply(bunhelpers.UseWhere(where)).
     Apply(bunhelpers.WhereEqual("status", "active"))
 ```
 
@@ -382,8 +382,52 @@ type User struct {
     Email     string    `bun:"email,notnull,unique"`
     Name      string    `bun:"name"`
     Status    string    `bun:"status"`
+    Role      string    `bun:"role"`
     Flags     int       `bun:"flags"`
     CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+}
+
+// Custom Where struct that embeds bunhelpers.Where
+// This allows you to add domain-specific filtering while reusing common filters
+type UserWhere struct {
+    bunhelpers.Where                          // Embed base Where for common filters
+    
+    Status        string   `json:"status,omitempty" form:"status"`
+    Roles         []string `json:"roles,omitempty" form:"roles"`
+    EmailContains string   `json:"email_contains,omitempty" form:"email_contains"`
+    IsVerified    *bool    `json:"is_verified,omitempty" form:"is_verified"`
+}
+
+// Apply custom WHERE conditions, then delegate to base Where
+func (w *UserWhere) ApplyFilters(q *bun.SelectQuery) *bun.SelectQuery {
+    if w == nil {
+        return q
+    }
+    
+    // Apply custom domain-specific filters
+    if w.Status != "" {
+        q = q.Where("?TableAlias.status = ?", w.Status)
+    }
+    if len(w.Roles) > 0 {
+        q = q.Where("?TableAlias.role IN (?)", bun.In(w.Roles))
+    }
+    if w.EmailContains != "" {
+        q = q.Where("?TableAlias.email ILIKE ?", "%"+w.EmailContains+"%")
+    }
+    if w.IsVerified != nil {
+        if *w.IsVerified {
+            q = q.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+                return q.Where("?TableAlias.flags & ? = ?", 1, 1)
+            })
+        } else {
+            q = q.Where("?TableAlias.flags & ? = 0", 1)
+        }
+    }
+    
+    // Apply base filters (IDs, flags, dates, soft deletes, etc.)
+    q = w.Where.Where(q)
+    
+    return q
 }
 
 type UserRepository struct {
@@ -396,16 +440,18 @@ func NewUserRepository(db *bun.DB) *UserRepository {
     }
 }
 
-func (r *UserRepository) FindActive(ctx context.Context, limit int) ([]*User, error) {
+func (r *UserRepository) Find(ctx context.Context, where *UserWhere) ([]*User, error) {
     var users []*User
     
-    err := r.querier.NewSelectQuery(ctx).
-        Model(&users).
-        Apply(bunhelpers.WhereEqual("status", "active")).
-        Limit(limit).
-        Order("created_at DESC").
-        Scan(ctx)
+    q := r.querier.NewSelectQuery(ctx).Model(&users)
     
+    // Apply custom filters
+    q = where.ApplyFilters(q)
+    
+    // Apply SELECT, LIMIT, OFFSET, ORDER BY from base Where
+    q = where.Select(q)
+    
+    err := q.Scan(ctx)
     return users, err
 }
 
@@ -421,6 +467,10 @@ func (r *UserRepository) Create(ctx context.Context, user *User) error {
     return err
 }
 
+func ToPtr[T any](v T) *T {
+    return &v
+}
+
 func main() {
     // Setup database
     dsn := "postgres://user:pass@localhost:5432/dbname?sslmode=disable"
@@ -431,12 +481,35 @@ func main() {
     repo := NewUserRepository(db)
     ctx := context.Background()
     
-    // Example 1: Simple query with selectors
-    users, err := repo.FindActive(ctx, 10)
+    // Example 1: Using custom UserWhere with both custom and base filters
+    where := &UserWhere{
+        // Custom filters
+        Status:        "active",
+        Roles:         []string{"admin", "moderator"},
+        EmailContains: "example.com",
+        IsVerified:    ToPtr(true),
+        
+        // Base filters from bunhelpers.Where
+        Where: bunhelpers.Where{
+            IDs:          []string{"1", "2", "3"},
+            CreatedAfter: ToPtr(time.Now().Add(-7*24*time.Hour).UnixMilli()),
+            Limit:        ToPtr(10),
+            Offset:       ToPtr(0),
+            SortBy:       1,
+            SortDesc:     true,
+            Order: bunhelpers.Order{
+                1: "created_at",
+                2: "email",
+                3: "name",
+            },
+        },
+    }
+    
+    users, err := repo.Find(ctx, where)
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Printf("Found %d active users\n", len(users))
+    fmt.Printf("Found %d users matching filters\n", len(users))
     
     // Example 2: Transaction with InTx
     err = bunhelpers.InTx(ctx, db, func(ctx context.Context) error {
@@ -445,6 +518,7 @@ func main() {
             Email:  "test@example.com",
             Name:   "Test User",
             Status: "active",
+            Role:   "user",
         }
         
         return repo.Create(ctx, user)
@@ -454,22 +528,25 @@ func main() {
         log.Fatal(err)
     }
     
-    // Example 3: Using Where struct
-    where := &bunhelpers.Where{
-        IDs: []string{"1", "2", "3"},
+    // Example 3: Using base bunhelpers.Where directly
+    baseWhere := &bunhelpers.Where{
+        IDs:   []string{"1", "2", "3"},
         Limit: ToPtr(10),
+        Order: bunhelpers.Order{1: "created_at"},
+        SortBy:   1,
+        SortDesc: true,
     }
-    where.Order = bunhelpers.Order{1: "created_at"}
-    where.SortBy = 1
-    where.SortDesc = true
     
-    query := db.NewSelect().Model(&users)
-    query = where.Where(query)
-    query = where.Select(query)
+    var moreUsers []*User
+    query := db.NewSelect().Model(&moreUsers)
+    query = baseWhere.Where(query)
+    query = baseWhere.Select(query)
     
     if err := query.Scan(ctx); err != nil {
         log.Fatal(err)
     }
+    
+    fmt.Printf("Found %d users using base Where\n", len(moreUsers))
 }
 ```
 
@@ -482,7 +559,7 @@ func main() {
 - `OrGroup(selectors ...Selector) Selector` - Create OR group
 - `AndGroup(selectors ...Selector) Selector` - Create AND group
 - `Or(selectors ...Selector) Selector` - Separate conditions with OR
-- `NestedWhere(where *Where) Selector` - Use Where struct as selector
+- `UseWhere(where *Where) Selector` - Use Where struct as selector
 - `WhereEqual(col string, value any) Selector`
 - `WhereNotEqual(col string, value any) Selector`
 - `WhereNull(col string) Selector`

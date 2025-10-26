@@ -440,7 +440,7 @@ func TestEscapeJsonPathSegment(t *testing.T) {
 	}
 }
 
-func TestNestedWhere(t *testing.T) {
+func TestUseWhere(t *testing.T) {
 	db := newTestDB()
 	defer db.Close()
 
@@ -449,12 +449,12 @@ func TestNestedWhere(t *testing.T) {
 	}
 
 	query := db.NewSelect().Model((*testModel)(nil))
-	selector := NestedWhere(*where)
+	selector := UseWhere(*where)
 
 	result := selector(query)
 	sql := result.String()
 
 	if !strings.Contains(sql, "id") || !strings.Contains(sql, "IN") {
-		t.Error("NestedWhere() should apply Where struct conditions")
+		t.Error("UseWhere() should apply Where struct conditions")
 	}
 }

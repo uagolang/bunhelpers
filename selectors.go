@@ -57,8 +57,8 @@ func Or(selectors ...Selector) Selector {
 	})...)
 }
 
-// NestedWhere allows to reuse the Where.Where() common logic as a Selector.
-func NestedWhere(where Where) Selector {
+// UseWhere allows to reuse the Where.Where() common logic as a Selector.
+func UseWhere(where Where) Selector {
 	return func(q *bun.SelectQuery) *bun.SelectQuery {
 		return where.Where(q)
 	}
